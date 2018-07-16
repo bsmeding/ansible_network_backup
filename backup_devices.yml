@@ -1,0 +1,28 @@
+---
+- name: Backup configuratie
+  hosts: p001-ut0-01
+  gather_facts: no
+  vars:
+    config_output_dir: "./CFGS/{{ inventory_hostname }}/backups"
+  tasks:
+    - name: Backup folder for {{ inventory_hostname }}
+      local_action: file path={{config_output_dir}} state=directory
+      run_once: yes
+      check_mode: no
+      changed_when: no
+      tags: [createfs, template]
+
+    - name: run show running-config on remote devices
+      ios_command:
+        commands: show running
+        provider: "{{ creds_core_ssh }}"
+      register: config
+
+    - name: Get current date
+      command: date +%Y%m%d
+      register: timestamp
+
+    - copy:
+        content: "{{ config.stdout[0] }}"
+        dest: "{{ config_output_dir }}/running-config_{{ inventory_hostname }}_{{ timestamp.stdout }}"        
+
