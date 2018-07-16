@@ -1,6 +1,6 @@
 ---
 - name: Backup configuratie
-  hosts: p001-ut0-01
+  hosts: backup-devices
   gather_facts: no
   vars:
     config_output_dir: "./CFGS/{{ inventory_hostname }}/backups"
@@ -17,12 +17,49 @@
         commands: show running
         provider: "{{ creds_core_ssh }}"
       register: config
+      when: "platform == 'cisco_ios'"
+
+    - name: get all backup files in directory
+      find:
+        paths: "{{ config_output_dir }}"
+      register: found_backup_files
+
+    - name: Get latest backup file
+      set_fact:
+        latest_file: "{{ found_backup_files.files | sort(attribute='mtime',reverse=true) | first }}"
+      when: found_backup_files.matched > 0
+
+#    - debug:
+#        msg: "{{ latest_file }}"
+#      when: found_backup_files.matched > 0
+
+    - name: Register latest config file
+      set_fact:
+        last_config: "{{ lookup('file', latest_file.path) }}"
+      when: found_backup_files.matched > 0
 
     - name: Get current date
       command: date +%Y%m%d
       register: timestamp
+      changed_when: False
+    
+    - name: Compare last file with current state
+      ios_config:
+        provider: "{{ creds_core_ssh }}"
+        diff_against: intended
+        intended_config: "{{ last_config }}"
+      when: found_backup_files.matched > 0
+      notify:
+        - save config
 
-    - copy:
+
+#    - debug:
+#        msg: "{{ config_changed }} "
+
+  handlers:
+
+    - name: save config 
+      copy:
         content: "{{ config.stdout[0] }}"
-        dest: "{{ config_output_dir }}/running-config_{{ inventory_hostname }}_{{ timestamp.stdout }}"        
+        dest: "{{ config_output_dir }}/running-config_{{ inventory_hostname }}_{{ timestamp.stdout }}"
 
