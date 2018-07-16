@@ -1,0 +1,5 @@
+inventory*
+/group_vars/*
+/host_vars/*
+/CFGS/*
+
