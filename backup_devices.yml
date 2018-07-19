@@ -1,65 +1,110 @@
 ---
-- name: Backup configuratie
+- name: Backup configuration 
   hosts: backup-devices
   gather_facts: no
   vars:
-    config_output_dir: "./CFGS/{{ inventory_hostname }}/backups"
+    config_output_dir: "./CFGS/{{ inventory_hostname }}"
+    config_history_subdir: "historie"
+    file_prefix: "{{ inventory_hostname }}"
+    file_suffix: ".config"
+    use_NAPALM: True
   tasks:
     - name: Backup folder for {{ inventory_hostname }}
-      local_action: file path={{config_output_dir}} state=directory
+      local_action: file path={{config_output_dir}}/{{ config_history_subdir }} state=directory
       run_once: yes
       check_mode: no
       changed_when: no
       tags: [createfs, template]
+
+    - name: Get current date
+      command: date +%Y%m%d
+      register: datestamp
+      changed_when: False
+
+    - name: Get current time
+      command: date +%H%M%S
+      register: timestamp
+      changed_when: False
+
 
     - name: run show running-config on remote devices
       ios_command:
         commands: show running
         provider: "{{ creds_core_ssh }}"
       register: config
-      when: "platform == 'cisco_ios'"
+      when: "(platform == 'cisco_ios' or platform == 'cisco_nxos') and use_NAPALM == False"
 
-    - name: get all backup files in directory
-      find:
-        paths: "{{ config_output_dir }}"
-      register: found_backup_files
+    - name: get current config (NAPALM)
+      napalm_get_facts:
+        provider: "{{ creds_napalm }}"
+        filter: config
+      register: config_napalm
+      when: use_NAPALM == True
 
-    - name: Get latest backup file
-      set_fact:
-        latest_file: "{{ found_backup_files.files | sort(attribute='mtime',reverse=true) | first }}"
-      when: found_backup_files.matched > 0
 
-#    - debug:
-#        msg: "{{ latest_file }}"
-#      when: found_backup_files.matched > 0
+    - name: Check if latest backup file exist for comparison
+      stat:
+        path: "{{ config_output_dir }}/{{ file_prefix }}{{ file_suffix }}"
+      register: stat_result
 
     - name: Register latest config file
       set_fact:
-        last_config: "{{ lookup('file', latest_file.path) }}"
-      when: found_backup_files.matched > 0
-
-    - name: Get current date
-      command: date +%Y%m%d
-      register: timestamp
-      changed_when: False
+        last_config: "{{ lookup('file', '{{ config_output_dir }}/{{ file_prefix }}{{ file_suffix }}') }}"
+      when: stat_result.stat.exists == True
     
-    - name: Compare last file with current state
+    - name: Compare last file with current state (IOS-core) << YOU MUST USE --diff IN PLAYBOOK EXECUTION
       ios_config:
         provider: "{{ creds_core_ssh }}"
         diff_against: intended
         intended_config: "{{ last_config }}"
-      when: found_backup_files.matched > 0
-      notify:
-        - save config
+      when: stat_result.stat.exists == True and use_NAPALM == False
+      register: config_diff
+      notify: "save new config"
+
+    - name: Compare last file with current state (NAPALM) << YOU MUST INSTALL AND ENABLE NAPALM
+      napalm_install_config:
+        provider: "{{ creds_napalm }}"
+        config_file: "{{ config_output_dir }}/{{ file_prefix }}{{ file_suffix }}"
+        commit_changes: no
+        replace_config: false
+        diff_file: "{{ config_output_dir }}/{{ config_history_subdir }}/{{ datestamp.stdout }}_{{ timestamp.stdout }}_{{ file_prefix }}.diff"
+      when: stat_result.stat.exists == True and use_NAPALM == True
+      notify: "save new config"
+
+    - name: Save first config file
+      copy:
+        content: "{{ config.stdout[0] }}"
+        dest: "{{ config_output_dir }}/{{ file_prefix }}{{ file_suffix }}"
+      when: stat_result.stat.exists == False
 
 
-#    - debug:
-#        msg: "{{ config_changed }} "
+
 
   handlers:
 
-    - name: save config 
+    - name: save old config
+      copy:
+        content: "{{ last_config }}"
+        dest: "{{ config_output_dir }}/{{ config_history_subdir }}/{{ datestamp.stdout }}_{{ timestamp.stdout }}_{{ file_prefix }}{{ file_suffix }}"
+      listen: "save new config"
+
+    - name: save current config
       copy:
         content: "{{ config.stdout[0] }}"
-        dest: "{{ config_output_dir }}/running-config_{{ inventory_hostname }}_{{ timestamp.stdout }}"
+        dest: "{{ config_output_dir }}/{{ file_prefix }}{{ file_suffix }}"
+      listen: "save new config"
+      when: use_NAPALM == False
+
+    - name: save current config
+      copy:
+        content: "{{ config_napalm }}"
+        dest: "{{ config_output_dir }}/{{ file_prefix }}{{ file_suffix }}"
+      listen: "save new config"
+      when: use_NAPALM == True
+
+#    - name: get difference of two files
+#      command: diff "{{ config_output_dir }}/{{ file_prefix }}{{ file_suffix }} {{ config_output_dir }}/{{ config_history_subdir }}/{{ datestamp.stdout }}_{{ timestamp.stdout }}_{{ file_prefix }}{{ file_suffix }}"
+#      register: difference
+#      listen: "save new config"
+
 
