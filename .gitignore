@@ -3,4 +3,6 @@ inventory*
 /host_vars/*
 /CFGS/*
 /OLD/*
+/ansible-extras/*
 *.retry
+.DS_Store
