@@ -1,0 +1,41 @@
+---
+- name: Backup configuration 
+  hosts: nxos
+  gather_facts: no
+  vars:
+    config_output_dir: "./CFGS/{{ inventory_hostname }}"
+    config_history_subdir: "historie"
+    file_prefix: "{{ inventory_hostname }}"
+    file_suffix: ".config"
+    use_NAPALM: True
+  tasks:
+
+    - name: get current config (NAPALM)
+      napalm_get_facts:
+        provider: "{{ creds_napalm }}"
+        filter: config
+      register: config
+      when: use_NAPALM == True
+
+
+    - debug:
+        msg: "{{ config }}"
+      when: use_NAPALM == True
+
+
+
+    - name: backup device configurations
+      nxos_config:
+        provider: "{{ creds_napalm }}"
+        backup: yes
+      register: nxos_config_backup
+
+    - name: copy the backup to the desired location
+      copy:
+        src: "{{ nxos_config_backup['backup_path'] }}"
+        dest: "nxos/{{ inventory_hostname }}"
+
+    - name: delete the original file
+      file:
+        path: "{{ nxos_config_backup['backup_path'] }}"
+        state: absent

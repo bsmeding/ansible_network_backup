@@ -1,0 +1,52 @@
+---
+- name: Backup configuratie
+  hosts: backup-devices
+  gather_facts: no
+  vars:
+    config_output_dir: "./CFGS/{{ inventory_hostname }}"
+    config_history_subdir: "historie"
+    file_prefix: "{{ inventory_hostname }}"
+  tasks:
+    - name: Backup folder for {{ inventory_hostname }}
+      local_action: file path={{config_output_dir}}/{{ config_history_subdir }} state=directory
+      run_once: yes
+      check_mode: no
+      changed_when: no
+      tags: [createfs, template]
+
+    - name: Get current date
+      command: date +%Y%m%d
+      register: timestamp
+      changed_when: False
+
+    - name: Check latest config file available
+      stat:
+        path: "{{ config_output_dir }}/{{ file_prefix }}_current.conf"
+      register: stat_result
+
+
+    - name: Check file against running config
+      napalm_install_config:
+        provider: "{{ creds_napalm }}"
+        config_file: "{{ config_output_dir }}/{{ file_prefix }}_current.conf"
+        commit_changes: no
+        replace_config: false
+        diff_file: "{{ config_output_dir }}/{{ config_history_subdir }}/{{ file_prefix }}_{{ timestamp }}.diff"
+      when: stat_result.stat.exists == True
+
+
+    - name: Get current config
+      napalm_get_facts:
+        provider: "{{ creds_napalm }}"
+        filter:
+          - config
+      register: config
+  
+    - debug:
+        var: "{{ config }}"
+    
+#    - name: save config 
+#      copy:
+#        content: "{{ config }}"
+#        dest: "{{ config_output_dir }}/running-config_{{ inventory_hostname }}_{{ timestamp.stdout }}.conf"
+#      when: stat_result.stat.exists == False 

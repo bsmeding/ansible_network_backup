@@ -1,0 +1,26 @@
+---
+- name: Backup configuration 
+  hosts: backup-devices
+  gather_facts: no
+  vars:
+    config_output_dir: "./CFGS/{{ inventory_hostname }}"
+    config_history_subdir: "historie"
+    file_prefix: "{{ inventory_hostname }}"
+    file_suffix: ".config"
+    use_NAPALM: True
+  tasks:
+
+    - name: get current config (NAPALM)
+      napalm_get_facts:
+        provider: "{{ creds_napalm }}"
+        filter: config
+      register: config
+      when: use_NAPALM == True
+
+
+    - debug:
+        msg: "{{ config['napalm_config'] }}"
+      when: use_NAPALM == True
+
+
+
