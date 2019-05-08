@@ -1,3 +1,6 @@
+#deprecated!
+Use https://github.com/bsmeding/PB_network_backup
+
 # ansible_network_backup
 Playbook for network backup with Ansible
 
